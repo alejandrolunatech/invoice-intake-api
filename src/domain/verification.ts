@@ -7,6 +7,18 @@ export const MAX_PAYMENT_TERM_DAYS = 60;
 
 const DAY_MS = 86_400_000;
 
+/**
+ * The time of a real calendar date written as YYYY-MM-DD, or undefined. Date.parse alone would
+ * turn 2026-02-30 into 2 March, so the parsed date must give back the same text.
+ */
+function calendarDate(text: string): number | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return undefined;
+  }
+  const time = Date.parse(`${text}T00:00:00Z`);
+  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === text ? time : undefined;
+}
+
 function result(code: CheckCode, passed: boolean, detail: string): CheckResult {
   return { code, passed, detail };
 }
@@ -80,9 +92,9 @@ function checkAmounts(invoice: ExtractedInvoice): CheckResult[] {
 }
 
 function checkDates(invoice: ExtractedInvoice, today: string): CheckResult[] {
-  const issued = Date.parse(`${invoice.issueDate}T00:00:00Z`);
+  const issued = calendarDate(invoice.issueDate);
   const now = Date.parse(`${today}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoice.issueDate) || Number.isNaN(issued)) {
+  if (issued === undefined) {
     return [result('ISSUE_DATE_NOT_IN_FUTURE', false, 'issue date missing or not a date')];
   }
   const checks = [result('ISSUE_DATE_NOT_IN_FUTURE', issued <= now,
@@ -90,8 +102,8 @@ function checkDates(invoice: ExtractedInvoice, today: string): CheckResult[] {
   if (invoice.dueDate === null) {
     return [...checks, result('DUE_DATE_VALID', true, 'no due date; the default term applies')];
   }
-  const due = Date.parse(`${invoice.dueDate}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoice.dueDate) || Number.isNaN(due)) {
+  const due = calendarDate(invoice.dueDate);
+  if (due === undefined) {
     return [...checks, result('DUE_DATE_VALID', false, 'due date is not a date')];
   }
   const termDays = Math.round((due - issued) / DAY_MS);

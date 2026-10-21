@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { compact } from '../../domain/identifiers.js';
 import type { CheckResult, ExtractedInvoice } from '../../domain/invoice.js';
 import {
-  KeyTakenError, type ExtractionLog, type ExtractionLogEntry, type InvoiceRecord, type InvoiceRepository, type InvoiceStatus,
+  DuplicateInvoiceError, KeyTakenError, type ExtractionLog, type ExtractionLogEntry, type InvoiceRecord, type InvoiceRepository, type InvoiceStatus,
 } from '../../application/ports.js';
 
 interface Row {
@@ -45,6 +45,9 @@ export class PostgresInvoices implements InvoiceRepository {
       if (isUniqueViolation(error, 'invoices_idempotency_key_key')) {
         throw new KeyTakenError(idempotencyKey);
       }
+      if (isUniqueViolation(error, 'invoices_one_paid_copy')) {
+        throw new DuplicateInvoiceError(record.id);
+      }
       throw error;
     }
   }
@@ -74,10 +77,17 @@ export class PostgresInvoices implements InvoiceRepository {
 
   /** Optimistic locking in one statement: the row changes only if nobody changed it first. */
   async update(record: InvoiceRecord, expectedVersion: number): Promise<InvoiceRecord | undefined> {
-    const { rowCount } = await this.pool.query(
-      'update invoices set status = $1, note = $2, version = $3 where id = $4 and version = $5',
-      [record.status, record.note, record.version, record.id, expectedVersion]);
-    return rowCount === 1 ? record : undefined;
+    try {
+      const { rowCount } = await this.pool.query(
+        'update invoices set status = $1, note = $2, version = $3 where id = $4 and version = $5',
+        [record.status, record.note, record.version, record.id, expectedVersion]);
+      return rowCount === 1 ? record : undefined;
+    } catch (error) {
+      if (isUniqueViolation(error, 'invoices_one_paid_copy')) {
+        throw new DuplicateInvoiceError(record.id);
+      }
+      throw error;
+    }
   }
 }
 

@@ -8,7 +8,7 @@ import { PostgresExtractionLog, PostgresInvoices } from '../../src/adapters/db/p
 import { createApp } from '../../src/adapters/http/app.js';
 import { ScriptedExtractor } from '../../src/adapters/llm/scripted.js';
 import { IntakeService } from '../../src/application/intake-service.js';
-import { KeyTakenError, type InvoiceRecord } from '../../src/application/ports.js';
+import { DuplicateInvoiceError, KeyTakenError, type InvoiceRecord } from '../../src/application/ports.js';
 import { SOURCE, invoice } from '../support/invoices.js';
 
 /** The real schema on PostgreSQL 17 in Docker: migrations, constraints, JSON columns, locking. */
@@ -63,6 +63,22 @@ describe('on PostgreSQL', () => {
     expect(await invoices.update({ ...stored, status: 'APPROVED', version: 2 }, 1)).toBeDefined();
     expect(await invoices.update({ ...stored, status: 'REJECTED', version: 2 }, 1)).toBeUndefined();
     expect((await invoices.findById(stored.id))?.status).toBe('APPROVED');
+  });
+
+  it('keeps one paid copy per supplier and invoice number, even when two arrive at once', async () => {
+    const invoices = new PostgresInvoices(pool);
+    const paid = { status: 'ACCEPTED' as const, extracted: invoice({ invoiceNumber: 'PG-RACE-1' }) };
+
+    const results = await Promise.allSettled([
+      invoices.create(record('00000000-0000-4000-8000-000000000005', paid), 'pg-key-0005', 'c'.repeat(64)),
+      invoices.create(record('00000000-0000-4000-8000-000000000006', paid), 'pg-key-0006', 'd'.repeat(64)),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const refused = results.find((result) => result.status === 'rejected');
+    expect(refused?.reason).toBeInstanceOf(DuplicateInvoiceError);
+    await expect(invoices.create(record('00000000-0000-4000-8000-000000000007', { extracted: paid.extracted }), 'pg-key-0007', 'e'.repeat(64)))
+      .resolves.toBeDefined();
   });
 
   it('serves the whole flow over HTTP and logs the call without the invoice text', async () => {

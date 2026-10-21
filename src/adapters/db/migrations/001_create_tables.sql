@@ -15,6 +15,9 @@ create table invoices (
 
 create index invoices_review_queue on invoices (received_at) where status = 'NEEDS_REVIEW';
 create index invoices_supplier_number on invoices (supplier_kvk, invoice_number) where status <> 'REJECTED';
+-- At most one accepted or approved copy of an invoice, even when two copies arrive at the same moment.
+create unique index invoices_one_paid_copy on invoices (supplier_kvk, invoice_number)
+    where status in ('ACCEPTED', 'APPROVED');
 
 -- One row per model call: what it cost and how it ended. Never the invoice text or the reply.
 create table extraction_calls (

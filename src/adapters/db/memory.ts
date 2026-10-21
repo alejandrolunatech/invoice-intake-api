@@ -1,6 +1,6 @@
 import { compact } from '../../domain/identifiers.js';
 import {
-  KeyTakenError, type ExtractionLog, type ExtractionLogEntry, type InvoiceRecord, type InvoiceRepository, type InvoiceStatus,
+  DuplicateInvoiceError, KeyTakenError, type ExtractionLog, type ExtractionLogEntry, type InvoiceRecord, type InvoiceRepository, type InvoiceStatus,
 } from '../../application/ports.js';
 
 /** Keeps everything in memory. For tests, and for trying the API without a database. */
@@ -8,9 +8,21 @@ export class InMemoryInvoices implements InvoiceRepository {
   private readonly byId = new Map<string, InvoiceRecord>();
   private readonly byKey = new Map<string, { id: string; fingerprint: string }>();
 
+  /** The same rule as the database's unique index invoices_one_paid_copy. */
+  private wouldBeSecondPaidCopy(record: InvoiceRecord): boolean {
+    const paid = (r: InvoiceRecord) => r.status === 'ACCEPTED' || r.status === 'APPROVED';
+    const kvk = record.extracted?.supplierKvk;
+    return paid(record) && kvk != null && [...this.byId.values()].some((other) => other.id !== record.id && paid(other)
+      && other.extracted?.invoiceNumber === record.extracted?.invoiceNumber
+      && other.extracted?.supplierKvk != null && compact(other.extracted.supplierKvk) === compact(kvk));
+  }
+
   create(record: InvoiceRecord, idempotencyKey: string, fingerprint: string): Promise<InvoiceRecord> {
     if (this.byKey.has(idempotencyKey)) {
       return Promise.reject(new KeyTakenError(idempotencyKey));
+    }
+    if (this.wouldBeSecondPaidCopy(record)) {
+      return Promise.reject(new DuplicateInvoiceError(record.id));
     }
     this.byId.set(record.id, record);
     this.byKey.set(idempotencyKey, { id: record.id, fingerprint });
@@ -41,6 +53,9 @@ export class InMemoryInvoices implements InvoiceRepository {
   update(record: InvoiceRecord, expectedVersion: number): Promise<InvoiceRecord | undefined> {
     if (this.byId.get(record.id)?.version !== expectedVersion) {
       return Promise.resolve(undefined);
+    }
+    if (this.wouldBeSecondPaidCopy(record)) {
+      return Promise.reject(new DuplicateInvoiceError(record.id));
     }
     this.byId.set(record.id, record);
     return Promise.resolve(record);

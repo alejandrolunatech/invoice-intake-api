@@ -53,6 +53,8 @@ describe('verify', () => {
     expect(failed(invoice({ dueDate: '2026-12-01' }), SOURCE, TODAY)).toEqual(['DUE_DATE_VALID']);
     expect(failed(invoice({ dueDate: null }), SOURCE, TODAY)).toEqual([]);
     expect(failed(invoice({ issueDate: '1 Oct 2026' }), SOURCE, TODAY)).toEqual(['ISSUE_DATE_NOT_IN_FUTURE']);
+    expect(failed(invoice({ issueDate: '2026-02-30', dueDate: null }), SOURCE, TODAY)).toEqual(['ISSUE_DATE_NOT_IN_FUTURE']);
+    expect(failed(invoice({ dueDate: '2026-10-32' }), SOURCE, TODAY)).toEqual(['DUE_DATE_VALID']);
   });
 
   it('refuses another currency', () => {

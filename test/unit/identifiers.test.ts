@@ -21,6 +21,11 @@ describe('identifiers', () => {
     expect(isIban('NL00')).toBe(false);
   });
 
+  it('refuses an IBAN from a country it has no length for, even when the checksum holds', () => {
+    expect(isIban('ZZ83ABCDEFGHIJ')).toBe(false);
+    expect(isIban('DE89370400440532013000')).toBe(true);
+  });
+
   it('accepts a VAT id that passes either the elfproef or the mod 97 check', () => {
     expect(isDutchVatId(IDS.vatElfproef)).toBe(true);
     expect(isDutchVatId(IDS.vatMod97)).toBe(true);

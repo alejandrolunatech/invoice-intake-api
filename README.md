@@ -64,7 +64,7 @@ Every response lists each check with its code and result, and `failedChecks` nam
 | Lines, VAT or total don't add up | `LINES_ADD_UP`, `VAT_ADDS_UP` or `GROSS_ADDS_UP` fails, computed in integer cents |
 | A VAT rate the Netherlands doesn't use | `VAT_RATES_ALLOWED` fails |
 | Dated in the future, or a payment term over 60 days | `ISSUE_DATE_NOT_IN_FUTURE` or `DUE_DATE_VALID` fails |
-| The supplier sends the same invoice twice | `NOT_A_DUPLICATE` fails |
+| The supplier sends the same invoice twice, even both at once | `NOT_A_DUPLICATE` fails; a partial unique index keeps one paid copy per supplier and number |
 | A client retries after a timeout | The same key and text return the first result; the model is not called again |
 | Two reviewers act on the same invoice | The second gets `412`: the If-Match version is stale |
 
@@ -144,7 +144,7 @@ CI runs the harness on the stand-in on every build. Real-model results will be c
 - **Domain tests** for money, checksums and every check, including the cent of rounding tolerated per line.
 - **Use-case tests** with in-memory adapters: contract violations, outages, retries, the race on a key, duplicates, reviews.
 - **Adapter tests**: the OpenAI SDK against a local fake server (request shape, strict schema, code fences, errors), and the HTTP API with Supertest.
-- **Integration tests** on PostgreSQL 17 in Testcontainers: migrations, JSON columns, the unique key, optimistic locking, and the full flow over HTTP.
+- **Integration tests** on PostgreSQL 17 in Testcontainers: migrations, JSON columns, the unique keys, a duplicate race, optimistic locking, and the full flow over HTTP.
 - **Layer rules** in ESLint: the domain imports no framework, use cases no adapter, the HTTP adapter neither the database nor the model.
 - TypeScript `strict` with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`; `typescript-eslint` strict type-checked rules.
 - **CI** on every pull request: Node 22 and 24, and a gitleaks secret scan over the full history.

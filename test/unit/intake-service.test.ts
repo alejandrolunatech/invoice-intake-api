@@ -111,6 +111,27 @@ describe('IntakeService', () => {
     expect(again.note).toBe('failed checks: NOT_A_DUPLICATE');
   });
 
+  it('accepts only one of two copies of the same invoice that arrive at once', async () => {
+    const { service } = setup();
+
+    const results = await Promise.all([
+      service.submit(SOURCE, 'key-00000001'),
+      service.submit(`${SOURCE}\nresent`, 'key-00000002'),
+    ]);
+
+    expect(results.map((record) => record.status).sort()).toEqual(['ACCEPTED', 'NEEDS_REVIEW']);
+    expect(results.find((record) => record.status === 'NEEDS_REVIEW')?.note).toBe('failed checks: NOT_A_DUPLICATE');
+  });
+
+  it('refuses to approve a copy of an invoice that is already accepted', async () => {
+    const { service } = setup();
+    await service.submit(SOURCE, 'key-00000001');
+    const copy = await service.submit(`${SOURCE}\nresent`, 'key-00000002');
+
+    await expect(service.approve(copy.id, 1, null)).rejects.toThrow(IllegalTransitionError);
+    expect((await service.reject(copy.id, 1, 'sent twice')).status).toBe('REJECTED');
+  });
+
   it('lets a person approve or reject only what waits for review, at the version they saw', async () => {
     const { service } = setup(() => Promise.resolve({ reply: invoice({ dueDate: '2027-01-30' }), usage }));
     const waiting = await service.submit(SOURCE, 'key-00000001');

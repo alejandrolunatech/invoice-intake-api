@@ -5,7 +5,7 @@ import { verify } from '../domain/verification.js';
 import { IdempotencyKeyReusedError, IllegalTransitionError, NotFoundError, VersionMismatchError } from './errors.js';
 import { extractionContract } from './extraction-contract.js';
 import {
-  ExtractorUnavailableError, KeyTakenError,
+  DuplicateInvoiceError, ExtractorUnavailableError, KeyTakenError,
   type ExtractionLog, type ExtractionOutcome, type InvoiceExtractor, type InvoiceRecord, type InvoiceRepository, type InvoiceStatus, type ModelUsage,
 } from './ports.js';
 
@@ -36,10 +36,17 @@ export class IntakeService {
     const id = randomUUID();
     const receivedAt = this.deps.now().toISOString();
     const triage = await this.extractAndCheck(id, sourceText, receivedAt.slice(0, 10));
-    const record: InvoiceRecord = { id, sourceText, receivedAt, version: 1, ...triage };
+    return this.store({ id, sourceText, receivedAt, version: 1, ...triage }, idempotencyKey, print);
+  }
+
+  /** Stores the result, settling the two races the database can detect: the same key, and the same invoice. */
+  private async store(record: InvoiceRecord, idempotencyKey: string, print: string): Promise<InvoiceRecord> {
     try {
       return await this.deps.invoices.create(record, idempotencyKey, print);
     } catch (error) {
+      if (error instanceof DuplicateInvoiceError && record.status === 'ACCEPTED') {
+        return this.store(markDuplicate(record), idempotencyKey, print);
+      }
       if (!(error instanceof KeyTakenError)) {
         throw error;
       }
@@ -123,12 +130,27 @@ export class IntakeService {
     if (record.status !== 'NEEDS_REVIEW') {
       throw new IllegalTransitionError(`an invoice in status ${record.status} cannot be ${status.toLowerCase()}`);
     }
-    const updated = await this.deps.invoices.update({ ...record, status, note, version: record.version + 1 }, expectedVersion);
+    let updated: InvoiceRecord | undefined;
+    try {
+      updated = await this.deps.invoices.update({ ...record, status, note, version: record.version + 1 }, expectedVersion);
+    } catch (error) {
+      if (error instanceof DuplicateInvoiceError) {
+        throw new IllegalTransitionError('an invoice with this supplier and number is already accepted or approved');
+      }
+      throw error;
+    }
     if (!updated) {
       throw new VersionMismatchError(`invoice ${id} was changed by someone else`);
     }
     return updated;
   }
+}
+
+/** Another request stored the same invoice first: this copy waits for a person. */
+function markDuplicate(record: InvoiceRecord): InvoiceRecord {
+  const checks = record.checks.map((check) => check.code === 'NOT_A_DUPLICATE'
+    ? { ...check, passed: false, detail: 'this supplier already sent this invoice number' } : check);
+  return { ...record, status: 'NEEDS_REVIEW', checks, note: 'failed checks: NOT_A_DUPLICATE' };
 }
 
 function sameRequestOrConflict(stored: { record: InvoiceRecord; fingerprint: string }, print: string, key: string) {

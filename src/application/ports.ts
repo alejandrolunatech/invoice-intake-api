@@ -33,19 +33,33 @@ export interface InvoiceRecord {
 }
 
 export interface InvoiceRepository {
-  /** Throws {@link KeyTakenError} when the idempotency key is already stored. */
+  /**
+   * Throws {@link KeyTakenError} when the idempotency key is already stored, and
+   * {@link DuplicateInvoiceError} when an accepted or approved invoice has the same supplier and number.
+   */
   create(record: InvoiceRecord, idempotencyKey: string, fingerprint: string): Promise<InvoiceRecord>;
   findById(id: string): Promise<InvoiceRecord | undefined>;
   findByIdempotencyKey(key: string): Promise<{ record: InvoiceRecord; fingerprint: string } | undefined>;
   /** Another invoice, not rejected, from the same supplier with the same number. */
   existsForSupplier(supplierKvk: string, invoiceNumber: string): Promise<boolean>;
   listByStatus(status: InvoiceStatus, limit: number): Promise<InvoiceRecord[]>;
-  /** Stores a change if the stored version is still {@code expectedVersion}; returns undefined if not. */
+  /**
+   * Stores a change if the stored version is still {@code expectedVersion}; returns undefined if not.
+   * Throws {@link DuplicateInvoiceError} when approving would make a second approved copy.
+   */
   update(record: InvoiceRecord, expectedVersion: number): Promise<InvoiceRecord | undefined>;
 }
 
 export class KeyTakenError extends Error {
   override readonly name = 'KeyTakenError';
+}
+
+/**
+ * The store already holds an accepted or approved invoice with this supplier and number. The
+ * database enforces it, so two concurrent submissions of one invoice cannot both be accepted.
+ */
+export class DuplicateInvoiceError extends Error {
+  override readonly name = 'DuplicateInvoiceError';
 }
 
 export type ExtractionOutcome = 'ACCEPTED' | 'SENT_TO_REVIEW' | 'CONTRACT_VIOLATION' | 'FAILED';
