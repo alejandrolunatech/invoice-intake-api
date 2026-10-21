@@ -1,0 +1,10 @@
+# A local PostgreSQL for `npm run dev`. Tests start their own with Testcontainers.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: invoices
+      POSTGRES_USER: invoices
+      POSTGRES_PASSWORD: invoices-local-only
+    ports:
+      - "5432:5432"
